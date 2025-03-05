@@ -1,0 +1,112 @@
+services:
+  mysql:
+    container_name: mysql
+    image: mysql:8.3.0
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - .././test_db:/test_db
+    ports:
+      - "${DB_MYSQL_PORT}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${DB_MYSQL_DATABASE}
+    env_file:
+      - ../.env
+    command: --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --binlog-row-image=full
+
+  mongodb:
+    container_name: mongodb
+    image: mongodb/mongodb-community-server
+    volumes:
+      - mongodb-data:/data/db
+    ports:
+      - "${DB_MONGODB_PORT}:27017"
+
+  zookeeper:
+    container_name: zookeeper
+    image: confluentinc/cp-zookeeper:7.3.2
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka-1:
+    container_name: kafka-1
+    image: confluentinc/cp-kafka:7.3.2
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data-1:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2 # Đảm bảo offset topic có ít nhất 1 bản sao.
+      KAFKA_MIN_INSYNC_REPLICAS: 1 # Yêu cầu ít nhất 1 replica hợp lệ để ghi dữ liệu, tránh mất dữ liệu khi có lỗi.
+
+  kafka-2:
+    container_name: kafka-2
+    image: confluentinc/cp-kafka:7.3.2
+    depends_on:
+      - zookeeper
+    ports:
+      - "9093:9093"
+    volumes:
+      - kafka-data-2:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29093,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+
+  kafka-connect:
+    image: debezium/connect:2.7.3.Final
+    container_name: kafka-connect
+    depends_on:
+      - kafka-1
+      - kafka-2
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29093
+      GROUP_ID: "debezium-connect"
+      CONFIG_STORAGE_TOPIC: "connect-configs"
+      OFFSET_STORAGE_TOPIC: "connect-offsets"
+      STATUS_STORAGE_TOPIC: "connect-status"
+      KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    env_file:
+      - ../.env
+    volumes:
+      - ./register-mysql.json:/register-mysql.json
+      - ./register-connector.sh:/register-connector.sh
+
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      - kafka-1
+      - kafka-2
+    ports:
+      - "5000:8080"
+    environment:
+      DYNAMIC_CONFIG_ENABLED: True
+      KAFKA_CLUSTERS_0_NAME: CDC Cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29093
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+
+volumes:
+  mysql-data:
+  mongodb-data:
+  kafka-data-1:
+  kafka-data-2:
