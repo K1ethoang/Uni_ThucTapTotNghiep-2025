@@ -91,6 +91,11 @@ DATABASES = {
     }
 }
 
+DB_MONGO_HOST = os.getenv('DB_MONGODB_HOST', 'localhost')
+DB_MONGO_USER = os.getenv('DB_MONGODB_USER', 'root')
+DB_MONGO_PASSWORD = os.getenv('DB_MONGODB_PASSWORD', '')
+DB_MONGO_PORT = os.getenv('DB_MONGODB_PORT', '27017')
+DB_MONGO_DB = os.getenv('DB_MONGODB_DATABASE', 'cdc_project')
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
@@ -132,3 +137,7 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Kafka
+KAFKA_BOOTSTRAP_SERVERS = "localhost:9092,localhost:9093"
+CONSUMER_GROUP_ID = "topic-test"
