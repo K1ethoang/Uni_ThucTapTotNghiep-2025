@@ -1,6 +1,6 @@
 import logging
 from typing import Dict
-
+from datetime import datetime, timedelta
 from pymongo import MongoClient
 from django.conf import settings
 
@@ -40,15 +40,32 @@ class MongoDb:
             logger.error("Collection name is missing from Kafka payload")
             return
 
+        # Chuyển đổi thời gian trước khi lưu vào MongoDB
+        before = self._convert_dates(before)
+        after = self._convert_dates(after)
+
         # Create
-        if op == 'c':
+        if op == 'c' or op == 'r':
             self.insert_one(collection_name, after)
         # Update
-        elif op == 'u' or op == 'r':
+        elif op == 'u':
             self.update_one(collection_name, before, after)
         # Delete
         elif op == 'd':
             self.remove_one(collection_name, before)
+
+    def _convert_dates(self, document: Dict) -> Dict:
+        """
+        Chuyển đổi các trường from_date và to_date từ số ngày sang datetime.
+        """
+        if not document:
+            return document
+
+        for date_field in ["from_date", "to_date"]:
+            if date_field in document and isinstance(document[date_field], int):
+                document[date_field] = datetime(1970, 1, 1) + timedelta(days=document[date_field])
+
+        return document
 
     def insert_one(self, collection_name: str, document: Dict) -> str:
         try:
@@ -61,16 +78,17 @@ class MongoDb:
 
     def update_one(self, collection_name: str, before: Dict, after: Dict):
         try:
-            if before is None:
+            if not before:
                 self.insert_one(collection_name, after)
+                return
+
+            result = self.db[collection_name].update_one(
+                before, {"$set": after}, upsert=False
+            )
+            if result.matched_count:
+                logger.info(f"Updated document in {collection_name} where {before} to {after}")
             else:
-                result = self.db[collection_name].update_one(
-                    before, {"$set": after}, upsert=True
-                )
-                if result.matched_count:
-                    logger.info(f"Updated document in {collection_name} where {before} to {after}")
-                else:
-                    logger.info(f"Inserted new document in {collection_name} due to upsert")
+                logger.warning(f"No matching document found for update: before {before} after {after}")
         except Exception as e:
             logger.error(f"Failed to update document in {collection_name}: {e}")
             raise

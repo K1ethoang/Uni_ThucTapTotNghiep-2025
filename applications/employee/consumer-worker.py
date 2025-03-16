@@ -1,8 +1,12 @@
 import json
 import logging
-import multiprocessing
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Process
+from threading import Thread, Event
+from queue import Queue, Empty
+
 import django
 from confluent_kafka import Consumer, KafkaError
 from django.conf import settings
@@ -15,81 +19,90 @@ logging.basicConfig(level=logging.INFO)
 # Setup Django
 django_project_dir = os.path.abspath(os.path.join(os.path.dirname(__name__)))
 sys.path.append(django_project_dir)
-
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "cdc_project.settings")
 django.setup()
 
-def consumer_worker(message_queue):
+consumer_config = {
+    'bootstrap.servers': settings.KAFKA_BOOTSTRAP_SERVERS,
+    'group.id': settings.CONSUMER_GROUP_ID,
+    'enable.auto.commit': False,  # Tắt auto commit để kiểm soát việc commit
+    'auto.offset.reset': 'earliest',
+}
+
+def consumer_worker(message_queue, stop_event):
     """
     Worker xử lý message từ queue và cập nhật vào MongoDB.
     """
-    mongo_db = MongoDb()  # Tạo MongoDB trong từng process riêng biệt
-    while True:
+    mongo_db = MongoDb()
+    while not stop_event.is_set():
         try:
-            message = message_queue.get()
-            if message is None:
-                break  # Dừng worker nếu nhận được tín hiệu kết thúc
-
-            # Parse payload
+            message = message_queue.get(timeout=1.0)  # Thêm timeout để kiểm tra stop_event
+            # Xử lý message
             payload = json.loads(message)['payload']
             logger.info(f"Processing payload: {payload}")
-
-            # Update MongoDB
             mongo_db.replicate_data(payload)
 
+            # Sau khi xử lý thành công, đặt message.queue.task_done()
+            message_queue.task_done()
+        except Empty:
+            continue  # Nếu queue rỗng, kiểm tra lại stop_event
         except Exception as e:
             logger.error(f"Worker error: {e}")
 
-def consume_message(message_queue):
+def consume_message(consumer, message_queue, stop_event):
     """
     Consumer nhận message từ Kafka và đưa vào queue.
     """
-    consumer_config = {
-        'bootstrap.servers': settings.KAFKA_BOOTSTRAP_SERVERS,
-        'group.id': settings.CONSUMER_GROUP_ID,
-        'auto.offset.reset': 'earliest',
-    }
-    consumer = Consumer(consumer_config)
-    consumer.subscribe(["^mysql\\.employees\\..*"]) # Lắng nghe các topic có tên mysql.employees.<table>
-
-    while True:
-        msgs = consumer.consume(num_messages=10, timeout=1.0)
-        if not msgs:
-            continue
-
-        for msg in msgs:
-            if msg is None or msg.value() is None:
-                logger.warning(f"Skipping message with Offset {msg.offset()} because value is None")
+    while not stop_event.is_set():
+        try:
+            msg = consumer.poll(timeout=1.0)
+            if msg is None:
                 continue
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     continue
                 logger.error(f"Kafka error: {msg.error()}")
-                break
-            try:
-                message_queue.put(msg.value().decode("utf-8"))
-            except Exception as e:
-                logger.error(f"Queue put error: {e}")
+                continue
+            message_queue.put(msg.value().decode("utf-8"))
 
-        consumer.commit()
+            # Đợi đến khi xử lý xong rồi mới commit offset
+            message_queue.join()
+            consumer.commit()
+        except Exception as e:
+            logger.error(f"Poll error: {e}")
+            break
+    consumer.close()
 
 def start_consumer_worker():
-    multiprocessing.set_start_method("spawn", force=True)  # Đảm bảo Windows hoạt động đúng
-    message_queue = multiprocessing.Queue()
+    consumer = Consumer(consumer_config)
+    consumer.subscribe(["^mysql\\.employees\\..*"])
+    message_queue = Queue()
+    stop_event = Event()  # Tạo Event để báo hiệu dừng
 
-    num_consumers = 2
-    num_workers = 2
+    try:
+        # Khởi động consumer thread
+        consumer_thread = Thread(target=consume_message, args=(consumer, message_queue, stop_event))
+        consumer_thread.start()
+
+        # Khởi động worker threads
+        with ThreadPoolExecutor(max_workers=settings.KAFKA_TOTAL_THREAD) as executor:
+            for _ in range(10):
+                executor.submit(consumer_worker, message_queue, stop_event)
+
+        consumer_thread.join()
+    except KeyboardInterrupt:
+        logger.info("Stop consumer worker")
+        stop_event.set()  # Báo hiệu tất cả thread dừng
+    finally:
+        consumer.close()
+
+if __name__ == "__main__":
+    logger.info("Starting Kafka consumer...")
     processes = []
 
-    # Khởi động consumer process
-    for _ in range(num_consumers):
-        p = multiprocessing.Process(target=consume_message, args=(message_queue,))
-        p.start()
-        processes.append(p)
-
-    # Khởi động worker process xử lý MongoDB
-    for _ in range(num_workers):
-        p = multiprocessing.Process(target=consumer_worker, args=(message_queue,))
+    # Khởi động các process
+    for _ in range(settings.KAFKA_TOTAL_WORKER):
+        p = Process(target=start_consumer_worker)
         p.start()
         processes.append(p)
 
@@ -97,16 +110,7 @@ def start_consumer_worker():
         for p in processes:
             p.join()
     except KeyboardInterrupt:
-        logger.info("Stopping processes...")
-    finally:
-        for _ in range(num_workers):
-            message_queue.put(None)  # Gửi tín hiệu dừng worker
-
+        logger.info("Stopping Kafka consumer due to KeyboardInterrupt...")
         for p in processes:
-            p.terminate()
+            p.terminate()  # Đảm bảo process dừng
             p.join()
-
-if __name__ == "__main__":
-    logger.info("Starting Kafka consumer with multiprocessing...")
-    start_consumer_worker()
-    logger.info("Stopping Kafka consumer...")

@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'applications.employee',
+    'rest_framework',
 ]
 
 MIDDLEWARE = [
@@ -140,4 +141,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Kafka
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092,localhost:9093"
-CONSUMER_GROUP_ID = "topic-test"
+CONSUMER_GROUP_ID = os.getenv('CONSUMER_GROUP_ID', 'cdc-group')
+KAFKA_TOTAL_THREAD = int(os.getenv('KAFKA_TOTAL_THREAD', 3))
+KAFKA_TOTAL_WORKER = int(os.getenv('KAFKA_TOTAL_WORKER', 1)) # Theo số Partition
