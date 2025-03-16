@@ -58,7 +58,8 @@ def consume_message(message_queue):
             continue
 
         for msg in msgs:
-            if msg is None:
+            if msg is None or msg.value() is None:
+                logger.warning(f"Skipping message with Offset {msg.offset()} because value is None")
                 continue
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:

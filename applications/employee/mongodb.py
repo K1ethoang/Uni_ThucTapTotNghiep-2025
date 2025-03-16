@@ -48,11 +48,12 @@ class MongoDb:
             self.update_one(collection_name, before, after)
         # Delete
         elif op == 'd':
-            self.remove_one(collection_name, after)
+            self.remove_one(collection_name, before)
 
     def insert_one(self, collection_name: str, document: Dict) -> str:
         try:
             result = self.db[collection_name].insert_one(document)
+            logger.info(f"Inserted new document in {collection_name} payload {document}")
             return str(result.inserted_id)
         except Exception as e:
             logger.error(f"Failed to insert document {document}: {str(e)}")
@@ -67,7 +68,7 @@ class MongoDb:
                     before, {"$set": after}, upsert=True
                 )
                 if result.matched_count:
-                    logger.info(f"Updated document in {collection_name} where {before}")
+                    logger.info(f"Updated document in {collection_name} where {before} to {after}")
                 else:
                     logger.info(f"Inserted new document in {collection_name} due to upsert")
         except Exception as e:
