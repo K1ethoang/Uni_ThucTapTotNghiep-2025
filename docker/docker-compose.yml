@@ -49,6 +49,7 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2 # Đảm bảo offset topic có ít nhất 1 bản sao.
       KAFKA_MIN_INSYNC_REPLICAS: 1 # Yêu cầu ít nhất 1 replica hợp lệ để ghi dữ liệu, tránh mất dữ liệu khi có lỗi.
+    restart: on-failure
 
   kafka-2:
     container_name: kafka-2
@@ -67,6 +68,7 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_MIN_INSYNC_REPLICAS: 1
+    restart: on-failure
 
   kafka-connect:
     image: debezium/connect:2.7.3.Final

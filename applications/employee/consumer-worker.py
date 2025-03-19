@@ -65,8 +65,6 @@ def consume_message(consumer, message_queue, stop_event):
                 continue
             message_queue.put(msg.value().decode("utf-8"))
 
-            # Đợi đến khi xử lý xong rồi mới commit offset
-            message_queue.join()
             consumer.commit()
         except Exception as e:
             logger.error(f"Poll error: {e}")
