@@ -8,7 +8,6 @@ done
 
 echo "Registering MySQL Debezium Connector..."
 
-envsubst < /register-mysql.json | curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" \
-  http://kafka-connect:8083/connectors/ -d @-
+envsubst < /register-mysql.json | curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" http://kafka-connect:8083/connectors/ -d @-
 
 echo "Connector registered successfully!"
