@@ -1,47 +1,47 @@
 # Uni_ThucTapTotNghiep-2025
 
-> Ứng dụng **Change Data Capture (CDC)** để chuyển đổi / đồng bộ dữ liệu thời gian thực giữa các hệ quản trị cơ sở dữ liệu: **MySQL → MongoDB**.
+> Applying **Change Data Capture (CDC)** to convert / synchronize data in real time between database management systems: **MySQL → MongoDB**.
 
-Báo cáo thực tập tốt nghiệp *"Ứng dụng Change Data Capture (CDC) để chuyển đổi dữ liệu giữa các hệ quản trị cơ sở dữ liệu"* – Trường ĐH Giao thông Vận tải (Phân hiệu TP.HCM), thực tập tại FPT Telecom, 2025.
+Graduation internship report *"Applying Change Data Capture (CDC) to convert data between database management systems"* – University of Transport and Communications (Ho Chi Minh City Campus), internship at FPT Telecom, 2025.
 
-📄 Xem chi tiết [báo cáo](https://github.com/K1ethoang/My-Achievements/blob/main/Reports/4th-year/TTTN.pdf)
+📄 See the full [report](https://github.com/K1ethoang/My-Achievements/blob/main/Reports/4th-year/TTTN.pdf)
 
-![Sơ đồ CDC](assets/cdc.png)
+![CDC diagram](assets/cdc.png)
 
 ---
 
-## Cách hoạt động
+## How it works
 
-1. **Bắt thay đổi ở MySQL** – **Debezium** (chạy trên Kafka Connect) kết nối MySQL qua `binlog` (`binlog-format=ROW`), ghi lại mọi `INSERT / UPDATE / DELETE` ở cấp dòng.
-2. **Đẩy sự kiện vào Kafka** – mỗi bảng MySQL tương ứng một topic `mysql.<database>.<table>`. Cụm Kafka gồm **2 broker** (`9092`, `9093`), mỗi topic 2 partition.
-3. **Tiêu thụ & ghi vào MongoDB** – `consumer-worker.py` (Kafka consumer, chạy ngoài Django nhưng dùng `settings` của Django) subscribe pattern `^mysql\.employees\..*`, giải mã payload Debezium và áp dụng thay đổi vào MongoDB:
+1. **Capture changes in MySQL** – **Debezium** (running on Kafka Connect) connects to MySQL via the `binlog` (`binlog-format=ROW`) and records every row-level `INSERT / UPDATE / DELETE`.
+2. **Publish change events to Kafka** – each MySQL table maps to a topic `mysql.<database>.<table>`. The Kafka cluster has **2 brokers** (`9092`, `9093`), each topic with 2 partitions.
+3. **Consume & write to MongoDB** – `consumer-worker.py` (a Kafka consumer that runs outside Django but reuses its `settings`) subscribes to the pattern `^mysql\.employees\..*`, decodes the Debezium payload, and applies the change to MongoDB:
    - `op = c` / `r` → `insert_one`
-   - `op = u` → `update_one` (`$set`, match theo bản ghi `before`)
-   - `op = d` → `delete_one` (match theo `before`)
-   - Trường ngày (`from_date`, `to_date`) được chuyển từ số ngày epoch sang `datetime`.
-4. **Ứng dụng mẫu Django** – cung cấp Django Admin + ORM models (map tới các bảng của bộ dữ liệu mẫu `employees`, `managed = False`).
+   - `op = u` → `update_one` (`$set`, match on the `before` document)
+   - `op = d` → `delete_one` (match on `before`)
+   - Date fields (`from_date`, `to_date`) are converted from epoch-day integers to `datetime`.
+4. **Sample Django app** – provides Django Admin + ORM models mapped to the tables of the `employees` sample database (`managed = False`).
 
-## Bộ dữ liệu
+## Dataset
 
-Sử dụng **Employees Sample Database** của MySQL: <https://github.com/datacharmer/test_db> (đã kèm trong thư mục `test_db/`).
-Các bảng: `employees`, `departments`, `dept_emp`, `dept_manager`, `titles`, `salaries`.
+Uses MySQL's **Employees Sample Database**: <https://github.com/datacharmer/test_db> (included in the `test_db/` folder).
+Tables: `employees`, `departments`, `dept_emp`, `dept_manager`, `titles`, `salaries`.
 
-## Yêu cầu
+## Requirements
 
 - Python **3.13**
 - Docker & Docker Compose
-- MySQL client (để nạp dữ liệu mẫu)
+- A MySQL client (to load the sample data)
 
-## Cài đặt & chạy
+## Setup & run
 
-### 1. Chuẩn bị
+### 1. Prepare
 
 ```bash
-# tạo file .env từ mẫu
+# create the .env file from the template
 cp dev.env .env
 ```
 
-Điền `.env`:
+Fill in `.env`:
 
 ```env
 DEBUG=True
@@ -60,35 +60,35 @@ DB_MONGODB_PORT=27017
 
 CONSUMER_GROUP_ID=cdc-group
 KAFKA_TOTAL_THREAD=3
-KAFKA_TOTAL_WORKER=1     # = số partition của topic
+KAFKA_TOTAL_WORKER=1     # = number of topic partitions
 ```
 
-### 2. Khởi động hạ tầng (Docker)
+### 2. Start the infrastructure (Docker)
 
 ```bash
 docker compose --env-file .env -f ./docker/docker-compose.yml up -d --build
 ```
 
-Các service: `mysql` (bật binlog ROW), `mongodb`, `zookeeper`, `kafka-1`, `kafka-2`, `kafka-connect` (Debezium 2.7.3), `kafka-ui`.
+Services: `mysql` (binlog ROW enabled), `mongodb`, `zookeeper`, `kafka-1`, `kafka-2`, `kafka-connect` (Debezium 2.7.3), `kafka-ui`.
 
-### 3. Nạp dữ liệu mẫu vào MySQL
+### 3. Load the sample data into MySQL
 
 ```bash
-# trong thư mục test_db (hoặc dùng script test_db/load-data.sh trong container mysql)
+# from the test_db folder (or use test_db/load-data.sh inside the mysql container)
 mysql -h 127.0.0.1 -u root -p employees < test_db/employees.sql
 ```
 
-### 4. Đăng ký Debezium connector
+### 4. Register the Debezium connector
 
 ```bash
 docker exec -it kafka-connect bash
-# kiểm tra Kafka Connect đã sẵn sàng
+# check that Kafka Connect is ready
 curl -s http://localhost:8083/
-# đăng ký connector cho MySQL
+# register the MySQL connector
 sh /register-connector.sh
 ```
 
-### 5. Chạy ứng dụng Django + consumer
+### 5. Run the Django app + consumer
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -102,37 +102,37 @@ python manage.py runserver                          # terminal 1 – Django admi
 python applications/employee/consumer-worker.py      # terminal 2 – CDC consumer (MySQL -> MongoDB)
 ```
 
-### 6. Truy cập
+### 6. Access
 
-| URL | Mô tả |
+| URL | Description |
 |---|---|
-| <http://127.0.0.1:8000/admin> | Django Admin – thao tác CRUD trên các bảng MySQL |
-| <http://127.0.0.1:5000> | Kafka UI – theo dõi broker / topic / consumer / message |
+| <http://127.0.0.1:8000/admin> | Django Admin – CRUD on the MySQL tables |
+| <http://127.0.0.1:5000> | Kafka UI – inspect brokers / topics / consumers / messages |
 
-Thử nghiệm: thêm / sửa / xoá bản ghi trong Django Admin (hoặc trực tiếp trong MySQL) → quan sát message trong Kafka UI → dữ liệu tương ứng được cập nhật trong MongoDB (`cdc` database, collection trùng tên bảng).
+Test: add / edit / delete a record in Django Admin (or directly in MySQL) → watch the message in Kafka UI → the corresponding data is updated in MongoDB (`cdc` database, collection named after the table).
 
-## Cấu trúc thư mục
+## Directory layout
 
 ```
 Uni_ThucTapTotNghiep-2025/
 ├── manage.py
 ├── requirements.txt
-├── dev.env                         # mẫu biến môi trường (đổi tên -> .env)
-├── cdc_project/                    # cấu hình Django (settings, MySQL + Mongo + Kafka)
+├── dev.env                         # environment template (rename -> .env)
+├── cdc_project/                    # Django config (settings: MySQL + Mongo + Kafka)
 ├── applications/employee/
-│   ├── models.py                   # ORM map bảng employees (managed = False)
+│   ├── models.py                   # ORM mapping of the employees tables (managed = False)
 │   ├── admin.py                    # Django Admin
-│   ├── mongodb.py                  # MongoDb.replicate_data() – áp dụng CDC event
-│   └── consumer-worker.py          # Kafka consumer đa tiến trình / đa luồng
+│   ├── mongodb.py                  # MongoDb.replicate_data() – applies a CDC event
+│   └── consumer-worker.py          # multi-process / multi-thread Kafka consumer
 ├── docker/
-│   ├── docker-compose.yml          # MySQL, MongoDB, Zookeeper, 2 Kafka broker, Kafka Connect, Kafka UI
-│   ├── register-mysql.json         # cấu hình Debezium MySQL connector
+│   ├── docker-compose.yml          # MySQL, MongoDB, Zookeeper, 2 Kafka brokers, Kafka Connect, Kafka UI
+│   ├── register-mysql.json         # Debezium MySQL connector config
 │   └── register-connector.sh
 └── test_db/                        # Employees Sample Database (datacharmer/test_db)
 ```
 
-## Hạn chế & hướng phát triển
+## Limitations & future work
 
-- Topic chỉ 2 partition, một consumer group → giới hạn throughput khi tải cao.
-- Chưa có cơ chế retry / error handling khi ghi MongoDB thất bại.
-- Hướng mở rộng: tăng partition, thêm consumer, tích hợp Apache Flink / Spark Streaming.
+- Topics have only 2 partitions and a single consumer group → limited throughput under heavy load.
+- No retry / error handling when a MongoDB write fails.
+- Possible extensions: more partitions, more consumers, integrating Apache Flink / Spark Streaming.
